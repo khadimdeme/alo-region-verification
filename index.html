@@ -6,8 +6,9 @@
     <script>
       const urlParams = new URLSearchParams(window.location.search);
       const code = urlParams.get("code");
+
       if (code) {
-        window.location.href = `yobouma://email-verified?code=${code}`;
+        window.location.href = `aloregion://email-verified?code=${code}`;
       } else {
         document.body.innerText = "Code de redirection non trouvé.";
       }
