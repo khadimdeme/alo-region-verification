@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Redirection</title>
+    <script>
+      const urlParams = new URLSearchParams(window.location.search);
+      const code = urlParams.get("code");
+      if (code) {
+        window.location.href = `yobouma://email-verified?code=${code}`;
+      } else {
+        document.body.innerText = "Code de redirection non trouvé.";
+      }
+    </script>
+  </head>
+  <body>
+    Redirection en cours...
+  </body>
+</html>
