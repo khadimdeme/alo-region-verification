@@ -29,25 +29,22 @@ export default async function handler(req, res) {
     `);
   }
 
-  const redirectUrl = `alo-region://email-verified?access_token=${token}`;
-
   if (data.verified) {
     return res.status(200).send(`
       <html>
         <head>
           <title>E-mail déjà vérifié</title>
-          <meta name="viewport" content="width=device-width, initial-scale=1" />
           <script>
             setTimeout(function() {
-              window.location.href = "${redirectUrl}";
+              window.location.href = "alo-region://email-verified?access_token=${token}";
             }, 500);
           </script>
         </head>
-        <body style="text-align:center; margin-top:100px; font-family:sans-serif;">
+        <body style="text-align:center; margin-top:100px;">
           <h2 style="color:green">✅ Ton e-mail a déjà été vérifié !</h2>
-          <p>Si l’application ne s’ouvre pas automatiquement, clique ci-dessous.</p>
-          <a href="${redirectUrl}" target="_blank">
-            <button style="margin-top:20px;padding:12px 24px;background-color:#3EC28F;color:white;border:none;border-radius:6px;font-size:16px;">
+          <p>Tu peux utiliser l'application.</p>
+          <a href="alo-region://email-verified?access_token=${token}">
+            <button style="margin-top:20px;padding:10px 20px;background-color:#3EC28F;color:white;border:none;border-radius:5px;">
               Ouvrir Alo Région
             </button>
           </a>
@@ -71,23 +68,22 @@ export default async function handler(req, res) {
     .update({ verified: true })
     .eq('token', token);
 
-  // 4. Affiche page de confirmation + bouton
+  // 4. Affiche page de confirmation + bouton d'ouverture vers app
   return res.status(200).send(`
     <html>
       <head>
         <title>Vérification réussie</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
         <script>
           setTimeout(function() {
-            window.location.href = "${redirectUrl}";
+            window.location.href = "alo-region://email-verified?access_token=${token}";
           }, 500);
         </script>
       </head>
-      <body style="text-align:center; margin-top:100px; font-family:sans-serif;">
+      <body style="text-align:center; margin-top:100px;">
         <h2 style="color:green">✅ Ton e-mail a bien été vérifié !</h2>
-        <p>Si l’application ne s’ouvre pas automatiquement, clique ci-dessous.</p>
-        <a href="${redirectUrl}" target="_blank">
-          <button style="margin-top:20px;padding:12px 24px;background-color:#3EC28F;color:white;border:none;border-radius:6px;font-size:16px;">
+        <p>Tu peux désormais utiliser l'application.</p>
+        <a href="alo-region://email-verified?access_token=${token}">
+          <button style="margin-top:20px;padding:10px 20px;background-color:#3EC28F;color:white;border:none;border-radius:5px;">
             Ouvrir Alo Région
           </button>
         </a>
