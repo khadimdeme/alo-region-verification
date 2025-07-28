@@ -1,0 +1,13 @@
+{
+  "name": "alo-region-verification",
+  "version": "1.0.0",
+  "description": "API de vérification email pour Alo Région",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vercel dev",
+    "start": "vercel dev"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.5"
+  }
+}
