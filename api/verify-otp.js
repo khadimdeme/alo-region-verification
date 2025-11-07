@@ -1,7 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
 import argon2 from 'argon2';
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 export default async function handler(req, res) {
   try {
@@ -10,7 +13,7 @@ export default async function handler(req, res) {
     const { email, code } = req.body || {};
     if (!email || !code) return res.status(400).json({ error: 'email & code required' });
 
-    // récupérer le dernier OTP non utilisé / non expiré
+    // 1) OTP valides récents
     const { data: rows, error } = await supabase
       .from('email_otps')
       .select('*')
@@ -19,56 +22,42 @@ export default async function handler(req, res) {
       .gt('expires_at', new Date().toISOString())
       .order('created_at', { ascending: false })
       .limit(3);
-    if (error) {
-      console.error(error);
-      return res.status(500).json({ error: 'query failed' });
-    }
-    if (!rows || rows.length === 0) {
-      return res.status(400).json({ error: 'Code expiré ou invalide' });
-    }
+    if (error) return res.status(500).json({ error: 'query failed' });
+    if (!rows?.length) return res.status(400).json({ error: 'Code expiré ou invalide' });
 
-    // comparer avec les 3 derniers (tolérance)
+    // 2) comparer hash
     let matchedId = null;
     for (const row of rows) {
-      const ok = await argon2.verify(row.code_hash, code);
-      if (ok) { matchedId = row.id; break; }
+      if (await argon2.verify(row.code_hash, code)) { matchedId = row.id; break; }
     }
     if (!matchedId) return res.status(400).json({ error: 'Code invalide' });
 
-    // marquer comme utilisé
+    // 3) marquer utilisé
     await supabase.from('email_otps').update({ used_at: new Date().toISOString() }).eq('id', matchedId);
 
-    // créer / récupérer l’utilisateur auth et démarrer une session
-    // 1) s’il existe déjà par email -> start session avec generateLink type magiclink désactivé, on utilise OTP :
-    const authAdmin = supabase.auth.admin;
-    // chercher user
-    const { data: list } = await authAdmin.listUsers({ email });
-    let user = list?.users?.[0];
-
+    // 4) s’assurer que l’utilisateur existe
+    const { data: byEmail } = await supabase.auth.admin.getUserByEmail(email);
+    let user = byEmail?.user;
     if (!user) {
-      // créer un compte "passwordless" avec un mot de passe aléatoire
       const pwd = cryptoRandom(32);
-      const { data: created, error: cErr } = await authAdmin.createUser({
+      const { data: created, error: cErr } = await supabase.auth.admin.createUser({
         email,
         password: pwd,
-        email_confirm: true    // on valide directement (OTP a validé l’adresse)
+        email_confirm: true,
       });
-      if (cErr) {
-        console.error(cErr);
-        return res.status(500).json({ error: 'create user failed' });
-      }
+      if (cErr) return res.status(500).json({ error: 'create user failed' });
       user = created.user;
     }
 
-    // créer une session
-    const { data: token, error: tErr } = await authAdmin.generateSession({ user_id: user.id });
-    if (tErr) {
-      console.error(tErr);
-      return res.status(500).json({ error: 'session failed' });
-    }
+    // 5) générer un action link admin (aucun email envoyé)
+    const { data: linkData, error: linkErr } = await supabase.auth.admin.generateLink({
+      type: 'magiclink',
+      email,
+    });
+    if (linkErr) return res.status(500).json({ error: 'generate link failed' });
 
-    // retourner les tokens au client Web (il fera supabase.auth.setSession)
-    return res.json({ ok: true, session: token });
+    // 6) renvoyer au client (Flutter fera getSessionFromUrl(action_link))
+    return res.json({ ok: true, action_link: linkData?.action_link });
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: 'server error' });
