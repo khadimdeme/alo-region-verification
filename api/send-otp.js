@@ -6,26 +6,24 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 const TTL_MIN = parseInt(process.env.OTP_TTL_MINUTES || '10', 10);
 
-// --- CORS helper ---
-const allowed = (process.env.CORS_ALLOWED_ORIGINS || 'https://www.aloregion.com,https://aloregion.com').split(',');
-function setCORS(req, res) {
-  const origin = req.headers.origin;
-  if (origin && allowed.includes(origin)) res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Vary', 'Origin');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-}
-
 export default async function handler(req, res) {
-  setCORS(req, res);
-  if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const ORIGIN = process.env.ALLOWED_ORIGIN || 'https://www.aloregion.com';
+
+  // CORS
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Origin', ORIGIN);
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    return res.status(204).end();
+  }
+  res.setHeader('Access-Control-Allow-Origin', ORIGIN);
 
   try {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
     const { email, purpose = 'login' } = req.body || {};
     if (!email) return res.status(400).json({ error: 'email required' });
 
-    // anti-abus: 1 OTP / 60s / email
     const { data: last } = await supabase
       .from('email_otps')
       .select('created_at')
@@ -39,7 +37,6 @@ export default async function handler(req, res) {
       if (delta < 60) return res.status(429).json({ error: 'Trop de demandes, réessayez dans quelques secondes.' });
     }
 
-    // code 6 chiffres (hashé en base)
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const codeHash = await argon2.hash(code);
     const expiresAt = new Date(Date.now() + TTL_MIN * 60 * 1000).toISOString();
