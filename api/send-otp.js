@@ -15,11 +15,14 @@ export default async function handler(req, res) {
     if (!email) return res.status(400).json({ error: 'email required' });
 
     // anti-abus: 1 OTP / 60s / email
-    const { data: last, error: errLast } = await supabase
+    const { data: last } = await supabase
       .from('email_otps')
       .select('created_at')
-      .eq('email', email).order('created_at', { ascending: false }).limit(1).maybeSingle();
-    if (errLast) console.error(errLast);
+      .eq('email', email)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
     if (last) {
       const delta = (Date.now() - new Date(last.created_at).getTime()) / 1000;
       if (delta < 60) return res.status(429).json({ error: 'Trop de demandes, réessayez dans quelques secondes.' });
@@ -34,10 +37,7 @@ export default async function handler(req, res) {
     const { error: insErr } = await supabase.from('email_otps').insert({
       email, code_hash: codeHash, purpose, expires_at: expiresAt
     });
-    if (insErr) {
-      console.error(insErr);
-      return res.status(500).json({ error: 'insert failed' });
-    }
+    if (insErr) return res.status(500).json({ error: 'insert failed' });
 
     // envoyer email
     await resend.emails.send({
