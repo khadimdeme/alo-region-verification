@@ -1,61 +1,75 @@
 import { createClient } from '@supabase/supabase-js';
-import argon2 from 'argon2';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+const ORIGIN = process.env.ALLOWED_ORIGIN || 'https://www.aloregion.com';
+const OTP_SECRET = process.env.OTP_SECRET || 'change-me';
+
+function setCors(res) {
+  res.setHeader('Access-Control-Allow-Origin', ORIGIN);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+}
+
+function hash(code, email) {
+  return createHmac('sha256', OTP_SECRET).update(`${email.toLowerCase()}:${code}`).digest('hex');
+}
+function safeEqual(a, b) {
+  const A = Buffer.from(a, 'hex');
+  const B = Buffer.from(b, 'hex');
+  return A.length === B.length && timingSafeEqual(A, B);
+}
+function randomPwd(len = 32) {
+  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  return Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+}
 
 export default async function handler(req, res) {
-  const ORIGIN = process.env.ALLOWED_ORIGIN || 'https://www.aloregion.com';
-
-  // CORS
-  if (req.method === 'OPTIONS') {
-    res.setHeader('Access-Control-Allow-Origin', ORIGIN);
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    return res.status(204).end();
-  }
-  res.setHeader('Access-Control-Allow-Origin', ORIGIN);
+  if (req.method === 'OPTIONS') { setCors(res); return res.status(204).end(); }
+  setCors(res);
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-
     const { email, code } = req.body || {};
     if (!email || !code) return res.status(400).json({ error: 'email & code required' });
 
+    // OTP valides récents
     const { data: rows, error } = await supabase
       .from('email_otps')
-      .select('*')
+      .select('id, code_hash, expires_at')
       .eq('email', email)
       .is('used_at', null)
       .gt('expires_at', new Date().toISOString())
       .order('created_at', { ascending: false })
-      .limit(3);
+      .limit(5);
     if (error) return res.status(500).json({ error: 'query failed' });
     if (!rows?.length) return res.status(400).json({ error: 'Code expiré ou invalide' });
 
+    const expected = hash(code, email);
     let matchedId = null;
     for (const row of rows) {
-      if (await argon2.verify(row.code_hash, code)) { matchedId = row.id; break; }
+      if (safeEqual(row.code_hash, expected)) { matchedId = row.id; break; }
     }
     if (!matchedId) return res.status(400).json({ error: 'Code invalide' });
 
+    // marquer utilisé
     await supabase.from('email_otps').update({ used_at: new Date().toISOString() }).eq('id', matchedId);
 
-    // créer / récupérer l’utilisateur
+    // garantir l’existence utilisateur
     const { data: byEmail } = await supabase.auth.admin.getUserByEmail(email);
     let user = byEmail?.user;
     if (!user) {
-      const pwd = cryptoRandom(32);
       const { data: created, error: cErr } = await supabase.auth.admin.createUser({
-        email, password: pwd, email_confirm: true,
+        email, password: randomPwd(), email_confirm: true
       });
       if (cErr) return res.status(500).json({ error: 'create user failed' });
       user = created.user;
     }
 
-    // générer un action link admin (aucun e-mail envoyé)
+    // action link (aucun e-mail envoyé)
     const { data: linkData, error: linkErr } = await supabase.auth.admin.generateLink({
-      type: 'magiclink',
-      email,
+      type: 'magiclink', email
     });
     if (linkErr) return res.status(500).json({ error: 'generate link failed' });
 
@@ -64,11 +78,4 @@ export default async function handler(req, res) {
     console.error(e);
     return res.status(500).json({ error: 'server error' });
   }
-}
-
-function cryptoRandom(len) {
-  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let out = '';
-  for (let i = 0; i < len; i++) out += chars[Math.floor(Math.random() * chars.length)];
-  return out;
 }
