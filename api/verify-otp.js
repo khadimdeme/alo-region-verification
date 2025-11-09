@@ -1,30 +1,20 @@
-// api/verify-otp.js
 import { createClient } from '@supabase/supabase-js';
-import { createHmac, timingSafeEqual, randomBytes } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 
-/* ---------- ENV ---------- */
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 const OTP_SECRET = process.env.OTP_SECRET || 'change-me';
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || process.env.ALLOWED_ORIGIN || '')
-  .split(',')
-  .map(s => s.trim())
-  .filter(Boolean);
 
-/* ---------- CORS ---------- */
+const allowList = (process.env.ALLOWED_ORIGIN || 'https://aloregion.com,https://www.aloregion.com')
+  .split(',').map(s => s.trim()).filter(Boolean);
+
 function setCors(req, res) {
   const origin = req.headers.origin;
-  if (origin && ALLOWED_ORIGINS.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  }
+  if (origin && allowList.includes(origin)) res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 }
 
-/* ---------- Utils ---------- */
 function hash(code, email) {
   return createHmac('sha256', OTP_SECRET)
     .update(`${email.toLowerCase()}:${code}`)
@@ -35,26 +25,23 @@ function safeEqualHex(a, b) {
   const B = Buffer.from(b, 'hex');
   return A.length === B.length && timingSafeEqual(A, B);
 }
-function randomPwd() {
-  // mot de passe aléatoire (compatible exigences supabase)
-  return randomBytes(24).toString('base64url'); // ~32 caractères
-}
-function getBody(req) {
-  if (!req.body) return {};
-  return typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+function randomPwd(len = 32) {
+  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let out = '';
+  for (let i = 0; i < len; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  return out;
 }
 
-/* ---------- Handler ---------- */
 export default async function handler(req, res) {
-  if (req.method === 'OPTIONS') { setCors(req, res); return res.status(204).end(); }
   setCors(req, res);
+  if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const { email, code } = getBody(req);
+    const { email, code } = req.body || {};
     if (!email || !code) return res.status(400).json({ error: 'email & code required' });
 
-    // 1) récupérer quelques OTP récents non utilisés
+    // OTP valides et récents
     const { data: rows, error } = await supabase
       .from('email_otps')
       .select('id, code_hash')
@@ -64,46 +51,34 @@ export default async function handler(req, res) {
       .order('created_at', { ascending: false })
       .limit(5);
 
-    if (error)       return res.status(500).json({ error: 'query failed' });
-    if (!rows?.length) return res.status(400).json({ error: 'Code expiré ou invalide' });
+    if (error) return res.status(500).json({ error: 'query failed' });
 
-    // 2) comparer HMAC
     const expected = hash(code, email);
-    let matchedId = null;
-    for (const row of rows) {
-      if (safeEqualHex(row.code_hash, expected)) { matchedId = row.id; break; }
-    }
-    if (!matchedId) return res.status(400).json({ error: 'Code invalide' });
+    const row = rows?.find(r => safeEqualHex(r.code_hash, expected));
+    if (!row) return res.status(400).json({ error: 'Code invalide' });
 
-    // 3) marquer l’OTP utilisé
-    await supabase.from('email_otps')
-      .update({ used_at: new Date().toISOString() })
-      .eq('id', matchedId);
+    await supabase.from('email_otps').update({ used_at: new Date().toISOString() }).eq('id', row.id);
 
-    // 4) s’assurer que l’utilisateur existe
+    // garantir l’utilisateur
     const { data: byEmail } = await supabase.auth.admin.getUserByEmail(email);
     let user = byEmail?.user;
     if (!user) {
       const { data: created, error: cErr } = await supabase.auth.admin.createUser({
-        email,
-        password: randomPwd(),
-        email_confirm: true,
+        email, password: randomPwd(), email_confirm: true
       });
       if (cErr) return res.status(500).json({ error: 'create user failed' });
       user = created.user;
     }
 
-    // 5) générer un lien d’action (aucun e-mail envoyé)
+    // créer un action_link (aucun mail envoyé)
     const { data: linkData, error: linkErr } = await supabase.auth.admin.generateLink({
-      type: 'magiclink',
-      email,
+      type: 'magiclink', email
     });
     if (linkErr) return res.status(500).json({ error: 'generate link failed' });
 
-    // 6) renvoyer au client Flutter Web → supabase.auth.getSessionFromUrl(action_link)
     return res.json({ ok: true, action_link: linkData?.action_link });
   } catch (e) {
-    console.error('verify-otp error:', e);
+    console.error(e);
     return res.status(500).json({ error: 'server error' });
   }
 }
