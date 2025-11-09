@@ -1,13 +1,16 @@
 {
   "name": "alo-region-verification",
-  "version": "1.0.0",
   "private": true,
+  "version": "1.0.0",
+  "description": "API OTP + verifications pour Alo Région",
   "type": "module",
+  "engines": { "node": "20.x" },
   "scripts": {
-    "dev": "vercel dev"
+    "dev": "vercel dev",
+    "start": "vercel dev"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.45.0",
-    "resend": "^3.3.0"
+    "@supabase/supabase-js": "^2.39.5",
+    "resend": "^3.4.0"
   }
 }
