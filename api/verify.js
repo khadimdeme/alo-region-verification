@@ -17,6 +17,7 @@ export default async function handler(req, res) {
   }
 
   try {
+    // 🔍 Vérifie si le token existe
     const { data, error } = await supabase
       .from('email_verifications')
       .select('*')
@@ -32,6 +33,7 @@ export default async function handler(req, res) {
       `);
     }
 
+    // ⏰ Vérifie l’expiration du lien
     const now = new Date();
     const expiresAt = data.expires_at ? new Date(data.expires_at) : null;
     if (expiresAt && expiresAt < now) {
@@ -41,14 +43,12 @@ export default async function handler(req, res) {
       `);
     }
 
+    // ✅ Si pas encore vérifié → mettre verified = true
     if (!data.verified) {
       const { error: updateError } = await supabase
         .from('email_verifications')
-        .update({
-          verified: true,
-          verified_at: new Date().toISOString(),
-        })
-        .eq('token', token); // ✅ plus fiable que data.id
+        .update({ verified: true }) // ❌ retiré verified_at pour correspondre au schéma actuel
+        .eq('token', token);
 
       if (updateError) {
         console.error('Erreur update verified:', updateError);
@@ -60,6 +60,7 @@ export default async function handler(req, res) {
       }
     }
 
+    // 🚀 Redirection vers l’app Alo Région
     const redirectUrl = `alo-region://email-verified?verified=1&email=${encodeURIComponent(data.email)}`;
     return res.status(200).send(`
       <!DOCTYPE html>
