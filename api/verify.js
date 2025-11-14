@@ -7,19 +7,14 @@ const supabase = createClient(
 );
 
 export default async function handler(req, res) {
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-
   const { token } = req.query;
 
   if (!token || typeof token !== 'string') {
-    return res.status(400).send(`
-      <h2>❌ Token manquant</h2>
-      <p>Le lien de vérification est invalide.</p>
-    `);
+    return res.redirect('https://www.aloregion.com/erreur-token'); // fallback simple
   }
 
   try {
-    // 1️⃣ On récupère la ligne correspondant au token
+    // 🔍 Cherche la ligne correspondant à ce token
     const { data, error } = await supabase
       .from('email_verifications')
       .select('id, email, expires_at, verified')
@@ -28,29 +23,19 @@ export default async function handler(req, res) {
       .limit(1)
       .maybeSingle();
 
-    if (error) {
+    if (error || !data) {
       console.error('Erreur lecture token:', error);
-      return res.status(500).send('<h2>Erreur serveur</h2><p>Réessaie plus tard.</p>');
+      return res.redirect('https://www.aloregion.com/erreur-token');
     }
 
-    if (!data) {
-      return res.status(400).send(`
-        <h2>❌ Lien invalide</h2>
-        <p>Ce lien de vérification n'existe pas ou a déjà été utilisé.</p>
-      `);
-    }
-
+    // 🕒 Vérifie expiration
     const now = new Date();
     const expiresAt = data.expires_at ? new Date(data.expires_at) : null;
-
     if (expiresAt && expiresAt < now) {
-      return res.status(400).send(`
-        <h2>❌ Lien expiré</h2>
-        <p>Ce lien a expiré. Demande un nouvel e-mail de confirmation depuis l'application.</p>
-      `);
+      return res.redirect('https://www.aloregion.com/erreur-expire');
     }
 
-    // 2️⃣ On met verified = TRUE (idempotent)
+    // ✅ Met à jour verified = true (idempotent)
     if (!data.verified) {
       const { error: updateError } = await supabase
         .from('email_verifications')
@@ -59,40 +44,16 @@ export default async function handler(req, res) {
 
       if (updateError) {
         console.error('Erreur update verified:', updateError);
-        return res.status(500).send('<h2>Erreur serveur</h2><p>Impossible de confirmer ton e-mail.</p>');
+        return res.redirect('https://www.aloregion.com/erreur-confirmation');
       }
     }
 
-    // 3️⃣ Deep link vers l’app (facultatif mais tu l’aimes bien)
-    const redirectUrl =
-      `alo-region://email-verified?verified=1&email=${encodeURIComponent(data.email)}`;
+    // 🚀 Redirection directe vers ton application mobile
+    const redirectUrl = `alo-region://email-verified?verified=1&email=${encodeURIComponent(data.email)}`;
+    return res.redirect(302, redirectUrl);
 
-    return res.status(200).send(`
-      <!DOCTYPE html>
-      <html lang="fr">
-      <head>
-        <meta charset="utf-8" />
-        <title>E-mail confirmé – Alo Région</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <meta http-equiv="refresh" content="0; url=${redirectUrl}" />
-      </head>
-      <body style="font-family: Arial, sans-serif; background:#f9fafb; padding:40px; text-align:center;">
-        <h1 style="color:#10B981;">Adresse e-mail confirmée ✅</h1>
-        <p>Merci, ton adresse <strong>${data.email}</strong> est maintenant vérifiée.</p>
-        <p>Si l’application ne s’ouvre pas automatiquement, clique sur le bouton ci-dessous.</p>
-        <p>
-          <a href="${redirectUrl}">
-            <button style="margin-top:20px;padding:12px 24px;background:#10B981;color:white;border:none;border-radius:6px;font-size:16px;">
-              Ouvrir Alo Région
-            </button>
-          </a>
-        </p>
-        <p style="margin-top:12px"><a href="https://www.aloregion.com/">Retour au site</a></p>
-      </body>
-      </html>
-    `);
   } catch (err) {
     console.error('Erreur générale verify:', err);
-    return res.status(500).send('<h2>Erreur serveur</h2><p>Réessaie plus tard.</p>');
+    return res.redirect('https://www.aloregion.com/erreur-serveur');
   }
 }
