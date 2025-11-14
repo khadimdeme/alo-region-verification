@@ -1,4 +1,3 @@
-// api/verify.js
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
@@ -18,10 +17,9 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1️⃣ Vérifie que le token existe
     const { data, error } = await supabase
       .from('email_verifications')
-      .select('id, email, verified, expires_at')
+      .select('*')
       .eq('token', token)
       .limit(1)
       .maybeSingle();
@@ -34,17 +32,15 @@ export default async function handler(req, res) {
       `);
     }
 
-    // 2️⃣ Vérifie l’expiration
     const now = new Date();
     const expiresAt = data.expires_at ? new Date(data.expires_at) : null;
     if (expiresAt && expiresAt < now) {
       return res.status(400).send(`
         <h2>❌ Lien expiré</h2>
-        <p>Ce lien de vérification a expiré. Merci de demander un nouvel e-mail depuis l’application.</p>
+        <p>Merci de demander un nouvel e-mail depuis l’application.</p>
       `);
     }
 
-    // 3️⃣ Marque comme vérifié
     if (!data.verified) {
       const { error: updateError } = await supabase
         .from('email_verifications')
@@ -52,31 +48,26 @@ export default async function handler(req, res) {
           verified: true,
           verified_at: new Date().toISOString(),
         })
-        .eq('id', data.id);
+        .eq('token', token); // ✅ plus fiable que data.id
 
       if (updateError) {
         console.error('Erreur update verified:', updateError);
         return res.status(500).send(`
           <h2>⚠️ Erreur interne</h2>
           <p>Impossible de confirmer ton e-mail pour le moment.</p>
+          <pre>${JSON.stringify(updateError, null, 2)}</pre>
         `);
       }
     }
 
-    // 4️⃣ Redirige vers l’app Alo Région
-    const redirectUrl = `alo-region://email-verified?verified=1&email=${encodeURIComponent(
-      data.email
-    )}`;
-
-    // ✨ Page HTML légère et élégante (affichée seulement si l’app ne s’ouvre pas)
+    const redirectUrl = `alo-region://email-verified?verified=1&email=${encodeURIComponent(data.email)}`;
     return res.status(200).send(`
       <!DOCTYPE html>
       <html lang="fr">
       <head>
         <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Vérification réussie</title>
         <meta http-equiv="refresh" content="0; url=${redirectUrl}" />
+        <title>Vérification réussie</title>
         <style>
           body { font-family: Arial, sans-serif; background: #f6f8fa; text-align: center; padding: 40px; }
           h1 { color: #10B981; }
